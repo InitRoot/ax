@@ -413,40 +413,65 @@ split_file() {
 file="$1"
 divisor="$2"
 tmp="$3"
-lines="$(wc -l "$file" | awk '{ print $1 }')"
-lines_per_file=$((lines / divisor))
-extra_lines=$((lines % divisor))
 
-# randomize the target list. To disable randomization, use the --dont-shuffle option
+# Create the split directory if it doesn't exist
+mkdir -p "$tmp/split"
+mkdir -p "$tmp/input"
+
+# Define a prefix for split files to make them easier to identify
+split_prefix="split_"
+
+# Count lines in the file - needed to calculate lines per file
+total_lines=$(wc -l < "$file")
+lines_per_file=$((total_lines / divisor))
+# Ensure at least 1 line per file
+if [ $lines_per_file -lt 1 ]; then
+    lines_per_file=1
+fi
+echo "Splitting $total_lines lines into approximately $lines_per_file lines per file"
+
+# For very large files, use a more efficient approach
 if [[ "$shuffle" != "false" ]]; then
-    shuf "$file" > "$tmp/split/targets"
+    # For shuffled files, use a line-count based split which works better with pipes
+    if command -v shuf &> /dev/null; then
+        # Use GNU shuf if available (much faster for large files)
+        shuf "$file" | split -d -a 4 -l $lines_per_file - "$tmp/split/${split_prefix}"
+    else
+        # Fallback to a slower but memory-efficient approach
+        # Generate a random number for each line and sort
+        awk '{print rand() "\t" $0}' "$file" | sort -k1,1 | cut -f2- | split -d -a 4 -l $lines_per_file - "$tmp/split/${split_prefix}"
+    fi
 else
-cp "$file" "$tmp/split/targets"
+    # For non-shuffled files, use split with line count
+    split -d -a 4 -l $lines_per_file "$file" "$tmp/split/${split_prefix}"
 fi
 
-# split file
-first=1
-for ((i=1; i<=divisor; i++)); do
-  last=$((first+lines_per_file-1))
-  if [[ $i -le $extra_lines ]]; then
-    last=$((last+1))
-  fi
-  # echo "Splitting lines $first to $last to file $i"
-  head -n $last "$tmp/split/targets" | tail -n $((last - first + 1))> $tmp/split/$i
-  first=$((last+1))
+# List all split files in order
+split_files=($(ls -1 "$tmp/split/${split_prefix}"* 2>/dev/null | sort -V))
+total_files=${#split_files[@]}
+
+echo "Created $total_files split files out of expected $divisor"
+
+# Move split files to input directory, matching each file with an instance
+instance_array=($instances)
+total_instances=${#instance_array[@]}
+
+for ((i=0; i<total_instances; i++)); do
+    instance=${instance_array[$i]}
+    
+    # If we have more instances than files, some instances won't get any data
+    if [ $i -lt $total_files ]; then
+        echo "Moving ${split_files[$i]} to $tmp/input/$instance"
+        cp "${split_files[$i]}" "$tmp/input/$instance"
+    else
+        echo "Warning: No split file available for instance $instance"
+        # Create an empty file so the instance has something to process
+        touch "$tmp/input/$instance"
+    fi
 done
-rm $tmp/split/targets
 
-# Rename "xaa" etc  to 1 2 3 4 5
-i=1
-for f in $(find "$tmp/split/" -type f | tr '/' ' ' | awk '{ print $NF }')
-do
-        instance="$(echo $instances | awk "{ print \$$i }")"
-        i=$((i+1))
-
-        mv "$tmp/split/$f" "$tmp/input/$instance"
-    done
-    total=$i
+# Clean up split directory
+rm -f "$tmp/split/${split_prefix}"* 2>/dev/null
 }
 
 ###########################################################################################################
