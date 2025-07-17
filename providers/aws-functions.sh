@@ -354,42 +354,51 @@ get_image_id() {
 
 # Manage snapshots used for axiom-images
 get_snapshots() {
-    local tempdir
-    tempdir=$(mktemp -d)
+    local tmp
+    tmp=$(mktemp -d)
     printf "%-40s %-8s %-s\n" "Name" "Size(GB)" "Regions"
 
     for region in $(aws ec2 describe-regions --query "Regions[].RegionName" --output text); do
         (
             aws ec2 describe-images --owners self --region "$region" \
                 --query "Images[*].[Name,BlockDeviceMappings[0].Ebs.VolumeSize]" --output text \
-            | awk -v r="$region" '{OFS="\t"; print $1, $2, r}' > "$tempdir/$region.txt"
+            | awk -v r="$region" '{OFS="\t"; print $1, $2, r}' >> "$tmp/all.txt"
         ) &
     done
     wait
 
     awk -F'\t' '
-        {
-            key=$1 FS $2
-            region_map[key]=(region_map[key] ? region_map[key] " " $3 : $3)
-        }
-        END {
-            for (k in region_map) {
-                split(k, f, FS)
-                split(region_map[k], r, " ")
-                asort(r)
-                regions=""
-                limit=3
-                for (i=1; i<=length(r) && i<=limit; i++) regions=(regions ? regions " " : "") r[i]
-                extra=(length(r)>limit) ? " (+ " (length(r)-limit) " more)" : ""
-                printf "%-40s %-8s [%s%s]\n", f[1], f[2], regions, extra
-            }
-        }
-        function asort(arr,   i,j,t) {
-            for(i=1;i<=length(arr);i++) for(j=i+1;j<=length(arr);j++) if(arr[i]>arr[j]) {t=arr[i];arr[i]=arr[j];arr[j]=t}
-        }
-    ' "$tempdir"/*.txt | sort
+    {
+        k = $1 FS $2          # Name + Size
+        regions[k] = regions[k] ? regions[k] " " $3 : $3
+    }
+    END {
+        for (k in regions) {
+            split(k, f, FS)          # f[1]=Name  f[2]=Size
 
-    rm -rf "$tempdir"
+            # ---- reset per-snapshot data ----
+            delete uniq; delete sorted
+
+            n = 0
+            split(regions[k], r, " ")
+            for (i in r) if (!(r[i] in uniq)) { uniq[r[i]]; sorted[++n] = r[i] }
+
+            # simple alphabetical sort (POSIX awk)
+            for (i = 1; i <= n; i++)
+                for (j = i + 1; j <= n; j++)
+                    if (sorted[i] > sorted[j]) { t = sorted[i]; sorted[i] = sorted[j]; sorted[j] = t }
+
+            # build display string
+            limit = 3; display = ""
+            for (i = 1; i <= (n < limit ? n : limit); i++)
+                display = display ? display " " sorted[i] : sorted[i]
+
+            extra = (n > limit) ? " (+ " (n - limit) " more)" : ""
+            printf "%-40s %-8s [%s%s]\n", f[1], f[2], display, extra
+        }
+    }' "$tmp/all.txt"
+
+    rm -rf "$tmp"
 }
 
 # Delete snapshot(s) by name across many regions, used by axiom-images
