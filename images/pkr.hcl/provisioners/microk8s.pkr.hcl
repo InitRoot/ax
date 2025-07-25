@@ -56,6 +56,81 @@ provisioner "file" {
         "echo 'Skipping SSH and network optimizations for container compatibility'",
         # Skip SSH config modifications to preserve working setup
         # Skip sysctl modifications as they don't work in containers
+        "echo 'Installing assetfinder'",
+        "/bin/su -l op -c '/usr/local/go/bin/go install github.com/tomnomnom/assetfinder@latest'",
+        "echo 'Downloading Files and Lists'",
+
+        "echo 'Downloading axiom-dockerfiles'",
+        "git clone https://github.com/attacksurge/dockerfiles.git /home/op/lists/axiom-dockerfiles",
+
+        "echo 'Downloading cent'",
+        "git clone https://github.com/xm1k3/cent.git /home/op/lists/cent",
+
+        "echo 'Downloading permutations'",
+        "wget -q -O /home/op/lists/permutations.txt https://gist.github.com/six2dez/ffc2b14d283e8f8eff6ac83e20a3c4b4/raw",
+
+        "echo 'Downloading Trickest resolvers'",
+        "wget -q -O /home/op/lists/resolvers.txt https://raw.githubusercontent.com/trickest/resolvers/master/resolvers.txt",
+
+        "echo 'Downloading SecLists'",
+        "#git clone https://github.com/danielmiessler/SecLists.git /home/op/lists/seclists",
+
+        "echo 'Installing ax framework'",
+        "/bin/su -l op -c 'git clone https://github.com/attacksurge/ax.git /home/op/.axiom && cd /home/op/.axiom/interact && ./axiom-configure --setup --shell zsh --unattended'",
+
+
+        "echo 'Installing anew'",
+        "/bin/su -l op -c '/usr/local/go/bin/go install -v github.com/tomnomnom/anew@latest'",
+
+
+        "echo 'Installing puredns'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/d3mondev/puredns/v2@latest'",
+
+        "echo 'Installing s3scanner'",
+        "/bin/su -l op -c '/usr/local/go/bin/go install -v github.com/sa7mon/s3scanner@latest'",
+
+        "echo 'Installing shuffledns'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest'",
+
+        "echo 'Installing httpx'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/projectdiscovery/httpx/cmd/httpx@latest'",
+        
+        "echo 'Installing katana'",
+        "/bin/su -l op -c '/usr/local/go/bin/go install github.com/projectdiscovery/katana/cmd/katana@latest'",
+
+        "echo 'Installing nmap'",
+        "apt install nmap -y -qq",
+
+        "echo 'Installing sqlmap'",
+        "git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git /home/op/recon/sqlmap-dev",
+
+        "echo 'Installing gobuster'",
+        "cd /tmp && wget -q -O /tmp/gobuster.7z https://github.com/OJ/gobuster/releases/download/v3.1.0/gobuster-linux-amd64.7z && p7zip -d /tmp/gobuster.7z && sudo mv /tmp/gobuster-linux-amd64/gobuster /usr/bin/gobuster && sudo chmod +x /usr/bin/gobuster",
+
+        "echo 'Installing google-chrome'",
+        "wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && cd /tmp/ && sudo apt install -y /tmp/chrome.deb -qq && apt --fix-broken install -qq",
+
+        "echo 'Installing subfinder'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'",
+
+        "echo 'Installing nuclei'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && /home/op/go/bin/nuclei'",
+
+
+        "echo 'Installing testssl'",
+        "git clone --depth 1 https://github.com/drwetter/testssl.sh.git /home/op/recon/testssl.sh",
+
+        "echo 'Installing tlsx'",
+        "/bin/su -l op -c 'GO111MODULE=on /usr/local/go/bin/go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest'",
+
+        "echo 'Installing trufflehog'",
+        "/bin/su -l op -c 'curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/master/scripts/install.sh | sudo sh -s -- -b /usr/local/bin'",
+
+        "echo 'Installing waybackurls'",
+        "/bin/su -l op -c '/usr/local/go/bin/go install github.com/tomnomnom/waybackurls@latest'",
+
+        "echo 'Installing webscreenshot'",
+        "/bin/su -l op -c 'pip3 install webscreenshot'",
 
         "echo 'Installing masscan'",
         "apt install masscan -y -qq",
