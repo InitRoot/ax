@@ -10,7 +10,7 @@ provisioner "file" {
 
         # Basic package updates and essential tools
         "apt update -qq",
-        "DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confnew install -y net-tools tmux zsh zsh-syntax-highlighting zsh-autosuggestions jq build-essential python3-pip unzip git p7zip libpcap-dev rubygems ruby-dev grc alien -qq",
+        "DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confnew install -y net-tools tmux zsh zsh-syntax-highlighting zsh-autosuggestions jq build-essential python3-pip unzip git p7zip libpcap-dev rubygems ruby-dev grc alien rsync -qq",
         
         # Skip firewall configuration in containers (not supported)
         "echo 'Skipping firewall configuration in container environment'",
