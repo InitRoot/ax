@@ -1,0 +1,13 @@
+{
+  "provider": "microk8s",
+  "namespace": "axiom",
+  "storage_class": "microk8s-hostpath",
+  "default_size": "medium",
+  "default_disk_size": "20",
+  "ssh_port_base": "30000",
+  "base_image": "axiom-base:latest",
+  "region": "axiom",
+  "sshkey": "axiom_rsa",
+  "provisioner": "default",
+  "imageid": "axiom-base:latest"
+}

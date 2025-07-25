@@ -1,0 +1,64 @@
+{
+  "variables": {
+    "base_image": "ubuntu:22.04",
+    "image_name": "axiom-base",
+    "image_tag": "latest"
+  },
+  "builders": [
+    {
+      "type": "docker",
+      "image": "{{ user `base_image` }}",
+      "commit": true,
+      "changes": [
+        "EXPOSE 2266",
+        "CMD [\"/start-ssh.sh\"]"
+      ]
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": [
+        "apt-get update -qq",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server sudo curl wget git vim htop net-tools iputils-ping dnsutils nmap",
+        "rm -rf /var/lib/apt/lists/*",
+        
+        "useradd -m -s /bin/bash op",
+        "echo 'op:axiom' | chpasswd",
+        "usermod -aG sudo op",
+        "echo 'op ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers",
+        
+        "mkdir /var/run/sshd",
+        "sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config",
+        "sed -i 's/#Port 22/Port 2266/' /etc/ssh/sshd_config",
+        "sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config",
+        "sed -i 's/#HostKey \\/etc\\/ssh\\/ssh_host_rsa_key/HostKey \\/etc\\/ssh\\/ssh_host_rsa_key/' /etc/ssh/sshd_config",
+        "sed -i 's/#HostKey \\/etc\\/ssh\\/ssh_host_ecdsa_key/HostKey \\/etc\\/ssh\\/ssh_host_ecdsa_key/' /etc/ssh/sshd_config",
+        "sed -i 's/#HostKey \\/etc\\/ssh\\/ssh_host_ed25519_key/HostKey \\/etc\\/ssh\\/ssh_host_ed25519_key/' /etc/ssh/sshd_config",
+        
+        "mkdir -p /home/op/.ssh",
+        "chown op:op /home/op/.ssh",
+        "chmod 700 /home/op/.ssh",
+        
+        "echo '#!/bin/bash' > /start-ssh.sh",
+        "echo 'set -e' >> /start-ssh.sh",
+        "echo 'echo \"Generating SSH host keys...\"' >> /start-ssh.sh",
+        "echo 'ssh-keygen -A' >> /start-ssh.sh",
+        "echo 'echo \"SSH host keys generated successfully\"' >> /start-ssh.sh",
+        "echo 'ls -la /etc/ssh/ssh_host_*' >> /start-ssh.sh",
+        "echo 'echo \"Starting SSH daemon...\"' >> /start-ssh.sh",
+        "echo 'exec /usr/sbin/sshd -D -p 2266' >> /start-ssh.sh",
+        "chmod +x /start-ssh.sh"
+      ]
+    }
+  ],
+  "post-processors": [
+    [
+      {
+        "type": "docker-tag",
+        "repository": "{{ user `image_name` }}",
+        "tag": "{{ user `image_tag` }}"
+      }
+    ]
+  ]
+}
