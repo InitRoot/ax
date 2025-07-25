@@ -14,15 +14,21 @@ create_instance() {
     user_data="$5"
     disk="$6"
 
-    # Default disk size to 20 if not provided (used for PVC size)
-    if [[ -z "$disk" || "$disk" == "null" ]]; then
-        disk="20"
-    fi
-
-    # Get configuration from axiom.json
+    # VPN is always enabled for microk8s - get VPN configuration
+    vpn_provider="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.vpn.provider')"
+    vpn_username="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.vpn.username')"
+    vpn_password="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.vpn.password')"
+    vpn_countries="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.vpn.countries')"
+    
+    # Get standard configuration
     namespace="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.namespace // "axiom"')"
     storage_class="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.storage_class // "microk8s-hostpath"')"
     ssh_port_base="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.ssh_port_base // "30000"')"
+
+    # Default disk size
+    if [[ -z "$disk" || "$disk" == "null" ]]; then
+        disk="20"
+    fi
 
     # Create namespace if it doesn't exist
     microk8s kubectl create namespace "$namespace" 2>/dev/null || true
@@ -65,7 +71,7 @@ spec:
     instance: $name
 EOF
 
-    # Create the pod with SSH server
+    # Create the VPN-enabled pod (always enabled)
     cat <<EOF | microk8s kubectl apply -f -
 apiVersion: v1
 kind: Pod
@@ -76,8 +82,37 @@ metadata:
     app: axiom-instance
     instance: $name
     axiom-size: $size
+    vpn-enabled: "true"
 spec:
   containers:
+  - name: vpn
+    image: qmcgaw/gluetun:v3.39.0
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+          - NET_ADMIN
+    env:
+    - name: VPN_SERVICE_PROVIDER
+      value: "$vpn_provider"
+    - name: VPN_TYPE
+      value: "openvpn"
+    - name: SERVER_COUNTRIES
+      value: "$vpn_countries"
+    - name: OPENVPN_USER
+      value: "$vpn_username"
+    - name: OPENVPN_PASSWORD
+      value: "$vpn_password"
+    - name: DNS_UPDATE_PERIOD
+      value: "0"
+    - name: DNS_KEEP_NAMESERVER
+      value: "on"
+    - name: FIREWALL_OUTBOUND_SUBNETS
+      value: "10.42.0.0/15,192.168.1.0/24,10.152.183.0/24"
+    - name: FIREWALL_INPUT_PORTS
+      value: "2266"
+    - name: FIREWALL
+      value: "on"
   - name: axiom
     image: $image_id
     ports:
@@ -86,11 +121,24 @@ spec:
     - name: SSH_USER_DATA
       value: |
 $(echo "$user_data" | sed 's/^/        /')
+    - name: VPN_ENABLED
+      value: "true"
     volumeMounts:
     - name: axiom-data
       mountPath: /home/op/data
     - name: ssh-keys
       mountPath: /home/op/.ssh
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+      echo "Waiting for VPN to be ready..."
+      until curl -s https://ipinfo.io/ip > /dev/null 2>&1; do
+        sleep 5
+      done
+      echo "VPN is ready, current IP:"
+      curl -s https://ipinfo.io/ip
+      echo "Starting SSH server..."
+      exec /start-ssh.sh
   volumes:
   - name: axiom-data
     persistentVolumeClaim:
@@ -101,15 +149,15 @@ $(echo "$user_data" | sed 's/^/        /')
 EOF
 
     # Wait for pod to be ready
-    microk8s kubectl wait --for=condition=Ready pod/axiom-$name -n "$namespace" --timeout=300s
+    microk8s kubectl wait --for=condition=Ready pod/axiom-$name -n "$namespace" --timeout=600s
     
     if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to create instance '$name' in namespace '$namespace'."
+        echo "Error: Failed to create VPN-enabled instance '$name' in namespace '$namespace'."
         return 1
     fi
 
-    # Allow time for SSH server to start
-    sleep 30
+    # Allow extra time for VPN connection and SSH server to start
+    sleep 60
 }
 
 ###################################################################
@@ -162,7 +210,8 @@ instances() {
         node: .spec.nodeName,
         size: (.metadata.labels."axiom-size" // "unknown"),
         namespace: .metadata.namespace,
-        created: .metadata.creationTimestamp
+        created: .metadata.creationTimestamp,
+        labels: .metadata.labels
     })'
 }
 
@@ -193,7 +242,7 @@ instance_pretty() {
     local data costs header fields numInstances totalCost
 
     data=$(instances)
-    header="Instance,IP,Status,Node,Size,Namespace"
+    header="Instance,IP,Status,Node,Size,VPN,Namespace"
     
     fields='.[] | [
         .name,
@@ -201,6 +250,7 @@ instance_pretty() {
         .status,
         (.node // "N/A"),
         .size,
+        (if .labels."vpn-enabled" == "true" then "Yes" else "No" end),
         .namespace
     ] | @csv'
 
@@ -212,11 +262,42 @@ instance_pretty() {
         data=""
     fi
 
-    footer="_,_,_,_,Instances,$numInstances"
+    footer="_,_,_,_,_,Instances,$numInstances"
 
     (echo "$header"; echo "$data"; echo "$footer") \
         | sed 's/"//g' \
         | column -t -s,
+}
+
+###################################################################
+# VPN Status Verification Function
+# Check VPN status for an instance
+#
+check_vpn_status() {
+    name="$1"
+    namespace="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.namespace // "axiom"')"
+    
+    # Check if instance has VPN enabled
+    vpn_enabled=$(microk8s kubectl get pod "axiom-$name" -n "$namespace" -o jsonpath='{.metadata.labels.vpn-enabled}' 2>/dev/null)
+    
+    if [[ "$vpn_enabled" == "true" ]]; then
+        echo "Checking VPN status for $name..."
+        
+        # Get current IP through the instance
+        current_ip=$(microk8s kubectl exec "axiom-$name" -n "$namespace" -c axiom -- curl -s https://ipinfo.io/ip 2>/dev/null)
+        
+        if [[ -n "$current_ip" ]]; then
+            echo "Instance $name VPN IP: $current_ip"
+            
+            # Get location info
+            location=$(microk8s kubectl exec "axiom-$name" -n "$namespace" -c axiom -- curl -s https://ipinfo.io/json 2>/dev/null | jq -r '.country + " - " + .city')
+            echo "Instance $name VPN Location: $location"
+        else
+            echo "Warning: Could not determine VPN IP for $name"
+        fi
+    else
+        echo "Instance $name does not have VPN enabled"
+    fi
 }
 
 ###################################################################
@@ -568,14 +649,51 @@ create_instances() {
     storage_class="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.storage_class // "microk8s-hostpath"')"
     ssh_port_base="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.ssh_port_base // "30000"')"
 
+    # VPN-aware fleet creation with geographic distribution
+    vpn_countries="$(cat "$AXIOM_PATH/axiom.json" | jq -r '.vpn.countries')"
+    
+    if [[ -n "$vpn_countries" && "$vpn_countries" != "null" ]]; then
+        echo "Creating VPN-enabled fleet with geographic distribution..."
+        
+        # Split countries for distribution
+        IFS=',' read -ra COUNTRIES <<< "$vpn_countries"
+        country_count=${#COUNTRIES[@]}
+        
+        echo "Distributing instances across VPN countries: ${COUNTRIES[*]}"
+    fi
+
     # Create namespace if it doesn't exist
     microk8s kubectl create namespace "$namespace" 2>/dev/null || true
 
-    # Create all instances in parallel
-    for name in "${names[@]}"; do
+    # Create all instances in parallel with country distribution
+    for i in "${!names[@]}"; do
+        name="${names[$i]}"
+        
+        if [[ -n "$vpn_countries" && "$vpn_countries" != "null" ]]; then
+            # Select country for this instance (round-robin)
+            country_index=$((i % country_count))
+            selected_country="${COUNTRIES[$country_index]}"
+            
+            echo "Creating $name with VPN exit in $selected_country"
+            
+            # Temporarily modify the config for this instance
+            temp_config=$(mktemp)
+            jq --arg country "$selected_country" '.vpn.countries = $country' "$AXIOM_PATH/axiom.json" > "$temp_config"
+            cp "$temp_config" "$AXIOM_PATH/axiom.json"
+            rm "$temp_config"
+        fi
+        
         (
             create_instance "$name" "$image_id" "$size" "$region" "$user_data" "$disk"
         ) &
+        
+        # Restore original config after starting instance creation
+        if [[ -n "$vpn_countries" && "$vpn_countries" != "null" ]]; then
+            temp_config=$(mktemp)
+            jq --arg countries "$vpn_countries" '.vpn.countries = $countries' "$AXIOM_PATH/axiom.json" > "$temp_config"
+            cp "$temp_config" "$AXIOM_PATH/axiom.json"
+            rm "$temp_config"
+        fi
     done
 
     # Monitor instance creation

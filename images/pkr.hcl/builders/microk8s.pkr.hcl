@@ -38,6 +38,22 @@ variable "image_tag" {
   default = "latest"
 }
 
+variable "vpn" {
+  type = object({
+    provider  = string
+    username  = string
+    password  = string
+    countries = string
+  })
+  default = {
+    provider  = ""
+    username  = ""
+    password  = ""
+    countries = ""
+  }
+  description = "VPN configuration (not used during image build, only at runtime)"
+}
+
 source "docker" "microk8s" {
   image  = var.base_image
   commit = true
@@ -54,7 +70,7 @@ build {
   provisioner "shell" {
     inline = [
       "apt-get update -qq",
-      "DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server sudo curl wget git vim htop net-tools iputils-ping dnsutils nmap",
+      "DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server sudo curl tmux wget git vim htop net-tools iputils-ping dnsutils nmap",
       "rm -rf /var/lib/apt/lists/*",
       
       # Create op user if it doesn't exist

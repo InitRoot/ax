@@ -189,6 +189,31 @@ if [[ "$base_image" == "" ]]; then
     echo -e "${Blue}Selected default option '$default_base_image'${Color_Off}"
 fi
 
+# VPN Configuration Section (always enabled for microk8s)
+echo -e "${BGreen}VPN Configuration (required for microk8s)${Color_Off}"
+echo -e "${BYellow}Available VPN providers: nordvpn, expressvpn, surfshark, protonvpn${Color_Off}"
+echo -e -n "${Green}Please enter your VPN provider (default: 'nordvpn'): \n>> ${Color_Off}"
+read vpn_provider
+if [[ "$vpn_provider" == "" ]]; then
+    vpn_provider="nordvpn"
+    echo -e "${Blue}Selected default option 'nordvpn'${Color_Off}"
+fi
+
+echo -e -n "${Green}Please enter your VPN username: \n>> ${Color_Off}"
+read vpn_username
+
+echo -e -n "${Green}Please enter your VPN password: \n>> ${Color_Off}"
+read -s vpn_password
+echo
+
+default_countries="Netherlands,United States,United Kingdom"
+echo -e -n "${Green}Please enter preferred countries (comma-separated, default: '$default_countries'): \n>> ${Color_Off}"
+read vpn_countries
+if [[ "$vpn_countries" == "" ]]; then
+    vpn_countries="$default_countries"
+    echo -e "${Blue}Selected default option '$default_countries'${Color_Off}"
+fi
+
 # Create namespace
 echo -e "${BGreen}Creating namespace '$namespace'...${Color_Off}"
 microk8s kubectl create namespace "$namespace" 2>/dev/null || echo -e "${BYellow}Namespace '$namespace' already exists.${Color_Off}"
@@ -207,8 +232,8 @@ if ! microk8s kubectl get storageclass "$storage_class" >/dev/null 2>&1; then
     fi
 fi
 
-# Create configuration data
-data="$(echo "{\"provider\":\"microk8s\",\"namespace\":\"$namespace\",\"storage_class\":\"$storage_class\",\"default_size\":\"$size\",\"default_disk_size\":\"$disk_size\",\"ssh_port_base\":\"$ssh_port_base\",\"base_image\":\"$base_image\",\"region\":\"$namespace\"}")"
+# Create configuration data (VPN always enabled for microk8s)
+data="$(echo "{\"provider\":\"microk8s\",\"namespace\":\"$namespace\",\"storage_class\":\"$storage_class\",\"default_size\":\"$size\",\"default_disk_size\":\"$disk_size\",\"ssh_port_base\":\"$ssh_port_base\",\"base_image\":\"$base_image\",\"region\":\"$namespace\",\"vpn\":{\"provider\":\"$vpn_provider\",\"username\":\"$vpn_username\",\"password\":\"$vpn_password\",\"countries\":\"$vpn_countries\"}}")"
 
 echo -e "${BGreen}Profile settings:${Color_Off}"
 echo "$data" | jq '.'

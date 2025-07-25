@@ -1,5 +1,0 @@
-# Masscan 1.3.2 scan initiated Fri Jul 25 06:51:49 2025
-# Ports scanned: TCP(3;52-52,80-80,443-443) UDP(0;) SCTP(0;) PROTOCOLS(0;)
-Timestamp: 1753426309	Host: 154.72.96.121 ()	Ports: 80/open/tcp//http//
-Timestamp: 1753426310	Host: 154.72.96.121 ()	Ports: 443/open/tcp//https//
-# Masscan done at Fri Jul 25 06:52:01 2025
