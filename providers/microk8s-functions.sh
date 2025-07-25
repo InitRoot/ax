@@ -88,7 +88,7 @@ spec:
 $(echo "$user_data" | sed 's/^/        /')
     volumeMounts:
     - name: axiom-data
-      mountPath: /home/op
+      mountPath: /home/op/data
     - name: ssh-keys
       mountPath: /home/op/.ssh
   volumes:

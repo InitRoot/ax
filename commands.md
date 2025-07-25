@@ -17,7 +17,7 @@ cp -r /home/runzero/ax/images/pkr.hcl/builders/microk8s.pkr.hcl /home/runzero/.a
   Here are the commands to completely clear all microk8s and Docker images:
 
 ### Should we manually run this command, doesn't other providers packer builds after runnning axiom-build do this? Is ours aligned?
-  docker push localhost:32000/axiom-base:axiom-microk8s-1753396673
+  docker push localhost:32000/axiom-base:axiom-microk8s-1753423968
 
 ## Docker Image Cleanup
 
