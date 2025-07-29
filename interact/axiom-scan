@@ -246,7 +246,7 @@ clean_up() {
       fi
        mkdir -p "$outfile-download"
        echo -e "${BGreen}downloading arbitrary remote file ${BGreen}to${Color_Off}: ${Color_Off}[ ${BBlue}$outfile-download${Color_Off} ]"
-       $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp _target_:/home/op/scan/$uid/$download_file_path $outfile-download/_target_ --cache -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
+       $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp _target_:/home/op/scan/$uid/_target_/$download_file_path $outfile-download/_target_ --cache -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
        echo -e "${Green}arbitrary remote file downloaded successfully!${Color_Off}"
      fi
 
@@ -261,7 +261,7 @@ clean_up() {
 
      # Kill tmux sessions with any orphaned proceses, exit all multiplexed SSH connections
      echo -e "${BBlue}killing remote processes...please wait${Color_Off}"
-     $interlace_cmd_nobar -c "$ssh_command _target_ 'tmux kill-session -t $uid'"  >/dev/null 2>&1
+     $interlace_cmd_nobar -c "$ssh_command _target_ 'tmux list-sessions 2>/dev/null | grep \"^$uid-\" | cut -d: -f1 | xargs -I {} tmux kill-session -t {}'" >/dev/null 2>&1
      $interlace_cmd_nobar -c "$ssh_exit_command _target_ " >/dev/null 2>&1
     fi
 
@@ -1096,7 +1096,7 @@ trap 'ctrl_c_pressed=true; clean_up' SIGINT SIGTERM
 #  Add default SSH commands
 #  Add ssh socket check and exit commands
 #
-scan_dir="/home/op/scan/$uid"
+scan_dir="/home/op/scan/$uid/_target_/_target_"
 ssh_command="ssh -F $sshconfig -o StrictHostKeyChecking=no"
 ssh_check_command="ssh -F $sshconfig -O check -o StrictHostKeyChecking=no"
 ssh_exit_command="ssh -F $sshconfig -O exit -o StrictHostKeyChecking=no"
@@ -1153,7 +1153,7 @@ fi
 if [[ "$local_wordlist" != "false" ]]; then
     if [[ -f "$local_wordlist" ]]; then
         local_wordlist_filename="$(echo "$local_wordlist" | tr '/' ' ' | awk '{ print $NF }')"
-        destination_wordlist="/home/op/scan/$uid/$local_wordlist_filename"
+        destination_wordlist="/home/op/scan/$uid/_target_/$local_wordlist_filename"
         wordlist="$destination_wordlist"
     else
         echo -e "${Red}Error: local wordlist file not found '$local_wordlist'...${Color_Off}"
@@ -1163,7 +1163,7 @@ fi
 if [[ "$distribute_wordlist" != "false" ]]; then
     if [[ -f "$distribute_wordlist" ]]; then
         distribute_wordlist_filename="$(echo "$distribute_wordlist" | tr '/' ' ' | awk '{ print $NF }')"
-        destination_wordlist="/home/op/scan/$uid/$distribute_wordlist_filename"
+        destination_wordlist="/home/op/scan/$uid/_target_/$distribute_wordlist_filename"
         wordlist="$destination_wordlist"
     else
         echo -e "${Red}Error: local wordlist to distribute file not found '$distribute_wordlist'...${Color_Off}"
@@ -1181,7 +1181,7 @@ fi
 if [[ "$local_folder" != "false" ]]; then
     if [[ -d "$local_folder" ]]; then
         local_folder_filename="$(echo "$local_folder" | tr '/' ' ' | awk '{ print $NF }')"
-        destination_folder="/home/op/scan/$uid/$local_folder_filename"
+        destination_folder="/home/op/scan/$uid/_target_/$local_folder_filename"
         folder="$destination_folder"
     else
         echo -e "${Red}Error: local folder not found '$local_folder'...${Color_Off}"
@@ -1199,7 +1199,7 @@ fi
 if [[ "$local_config" != "false" ]]; then
     if [[ -f "$local_config" ]]; then
         local_config_filename="$(echo "$local_config" | tr '/' ' ' | awk '{ print $NF }')"
-        destination_config="/home/op/scan/$uid/$local_config_filename"
+        destination_config="/home/op/scan/$uid/_target_/$local_config_filename"
         config_file="$destination_config"
     else
         echo -e "${Red}Error: local config file not found '$local_config'...${Color_Off}"
@@ -1265,7 +1265,7 @@ fi
 if [[ "$local_folder" != "false" ]]; then
  if [[ -d "$local_folder" ]]; then
         local_folder_filename="$(echo "$local_folder" | tr '/' ' ' | awk '{ print $NF }')"
-        destination_folder="/home/op/scan/$uid/$local_folder_filename"
+        destination_folder="/home/op/scan/$uid/_target_/$local_folder_filename"
         folder="$destination_folder"
         echo -e "${BGreen}uploading local folder ${Color_Off}: ${BBlue} $local_folder${Color_Off} to ${BBlue}$destination_folder...${Color_Off}"
         interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_folder _target_:$destination_folder/ --cache -F=$sshconfig >> /dev/null"
@@ -1279,7 +1279,7 @@ fi
 if [[ "$local_config" != "false" ]]; then
  if [[ -f "$local_config" ]]; then
   user_config_filename="$(echo "$local_config" | tr '/' ' ' | awk '{ print $NF }')"
-  destination_config="/home/op/scan/$uid/$user_config_filename"
+  destination_config="/home/op/scan/$uid/_target_/$user_config_filename"
   config_file="$destination_config"
   echo -e "${BGreen}uploading local config file${Color_Off}${BBlue} : $local_config${Color_Off} to ${BBlue}$destination_config...${Color_Off}"
   interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_config _target_:$destination_config --cache -F=$sshconfig >> /dev/null"
@@ -1404,7 +1404,8 @@ fi
 ###########################################################################################################
 #  use axiom-scp to upload each input file to a remote instance
 #
-$interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input --cache -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_" && echo -n -e "[ ${Green}OK${Color_Off} ]\n" || echo -n -e "[ ${Red}FAIL${Color_Off} ]\n" 
+#$interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input --cache -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_" && echo -n -e "[ ${Green}OK${Color_Off} ]\n" || echo -n -e "[ ${Red}FAIL${Color_Off} ]\n" 
+$interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_"
 
 ###########################################################################################################
 #  This function is spanwed in the background and periodically probes all instances to see if their part of the scan has completed.
@@ -1598,12 +1599,10 @@ if [[ "$one_shot_module" == "true" ]]; then
 
 # Simple Modules run a bash command on the remote instances
 else
- $interlace_cmd_nobar -c "$ssh_command _target_ 'tmux new -d -s $uid && \
-  tmux send-keys -t $uid \"cd $scan_dir; \
-  bash -i command $stdout_stderr_log ; touch _target_\" ENTER ' \
-  \"&& tmux send-keys -t $uid exit ENTER\""
+ $interlace_cmd_nobar -c "$ssh_command _target_ \"tmux new -d -s $uid-_target_ && tmux send-keys -t $uid-_target_ 'cd $scan_dir; bash -i command > >(tee -a stdout.log) 2> >(tee -a stderr.log >&2); touch _target_' ENTER && tmux send-keys -t $uid-_target_ C-d\""
 fi
 
+# "ssh _target_ 'tmux new -d -s $uid-_target_ && tmux send-keys -t $uid-_target_ \"cd /path; bash -i command > log 2>&1 ; touch _target_\" ENTER && tmux send-keys -t $uid-_target_ C-d'"
 # wait until 'remote tail PID' returns
  wait $remotetailPID  >> /dev/null 2>&1
 

@@ -123,6 +123,12 @@ spec:
 $(echo "$user_data" | sed 's/^/        /')
     - name: VPN_ENABLED
       value: "true"
+    - name: TMUX_TMPDIR
+      value: "/tmp/tmux-$name"
+    - name: TMPDIR
+      value: "/tmp/tmp-$name"
+    - name: AXIOM_INSTANCE_NAME
+      value: "$name"
     volumeMounts:
     - name: axiom-data
       mountPath: /home/op/data
@@ -137,6 +143,20 @@ $(echo "$user_data" | sed 's/^/        /')
       done
       echo "VPN is ready, current IP:"
       curl -s https://ipinfo.io/ip
+      echo "Setting up tmux isolation environment variables..."
+      echo "export TMUX_TMPDIR=/tmp/tmux-$name" >> /home/op/.bashrc
+      echo "export TMPDIR=/tmp/tmp-$name" >> /home/op/.bashrc
+      echo "export AXIOM_INSTANCE_NAME=$name" >> /home/op/.bashrc
+      echo "export TMUX_TMPDIR=/tmp/tmux-$name" >> /home/op/.profile
+      echo "export TMPDIR=/tmp/tmp-$name" >> /home/op/.profile
+      echo "export AXIOM_INSTANCE_NAME=$name" >> /home/op/.profile
+      echo "$name" > /tmp/axiom_instance_name
+      chmod 644 /tmp/axiom_instance_name
+      chown op:op /home/op/.bashrc /home/op/.profile /tmp/axiom_instance_name
+      echo "Setting up SSH environment for tmux isolation..."
+      echo "export AXIOM_INSTANCE_NAME=$name" >> /etc/environment
+      echo "SetEnv AXIOM_INSTANCE_NAME=$name" >> /etc/ssh/sshd_config.d/axiom_env.conf
+      echo "AcceptEnv AXIOM_INSTANCE_NAME" >> /etc/ssh/sshd_config.d/axiom_env.conf
       echo "Starting SSH server..."
       exec /start-ssh.sh
   volumes:
