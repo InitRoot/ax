@@ -1096,7 +1096,7 @@ trap 'ctrl_c_pressed=true; clean_up' SIGINT SIGTERM
 #  Add default SSH commands
 #  Add ssh socket check and exit commands
 #
-scan_dir="/home/op/scan/$uid/_target_/_target_"
+scan_dir="/home/op/scan/$uid/_target_"
 ssh_command="ssh -F $sshconfig -o StrictHostKeyChecking=no"
 ssh_check_command="ssh -F $sshconfig -O check -o StrictHostKeyChecking=no"
 ssh_exit_command="ssh -F $sshconfig -O exit -o StrictHostKeyChecking=no"

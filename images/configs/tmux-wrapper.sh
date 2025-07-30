@@ -27,13 +27,23 @@ if [ -z "$INSTANCE_NAME" ] || [ "$INSTANCE_NAME" = "unknown" ]; then
     debug_log "Using fallback name: $INSTANCE_NAME"
 fi
 
-TMUX_SOCKET="/tmp/tmux-$INSTANCE_NAME/default"
+# Use shared tmp storage for microk8s compatibility
+TMUX_SOCKET="/tmp/shared/tmux-$INSTANCE_NAME/default"
 debug_log "Using socket: $TMUX_SOCKET"
 
-# Create directory with proper permissions
-mkdir -p "/tmp/tmux-$INSTANCE_NAME"
-chown op:op "/tmp/tmux-$INSTANCE_NAME" 2>/dev/null || true
-chmod 755 "/tmp/tmux-$INSTANCE_NAME" 2>/dev/null || true
+# Create directory with proper permissions in shared storage
+mkdir -p "/tmp/shared/tmux-$INSTANCE_NAME"
+chown op:op "/tmp/shared/tmux-$INSTANCE_NAME" 2>/dev/null || true
+chmod 755 "/tmp/shared/tmux-$INSTANCE_NAME" 2>/dev/null || true
+
+# Fallback to local tmp if shared storage not available
+if [ ! -d "/tmp/shared" ]; then
+    TMUX_SOCKET="/tmp/tmux-$INSTANCE_NAME/default"
+    mkdir -p "/tmp/tmux-$INSTANCE_NAME"
+    chown op:op "/tmp/tmux-$INSTANCE_NAME" 2>/dev/null || true
+    chmod 755 "/tmp/tmux-$INSTANCE_NAME" 2>/dev/null || true
+    debug_log "Fallback to local socket: $TMUX_SOCKET"
+fi
 
 # Execute real tmux with isolated socket
 exec /usr/bin/tmux -S "$TMUX_SOCKET" "$@"
