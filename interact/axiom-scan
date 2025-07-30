@@ -191,6 +191,12 @@ function help() {
 # Kill remote tmux sessions and exit socket. Mv scan tmp to logs folder and display exit stats
 #
 clean_up() {
+     # Prevent multiple cleanup calls
+     if [ "$cleanup_called" = "true" ]; then
+         return
+     fi
+     cleanup_called="true"
+     
      trap exit SIGINT SIGTERM
      
      echo -e "${BYellow}Cleaning up processes...${Color_Off}"
@@ -230,23 +236,37 @@ clean_up() {
 
      # Check if any instance can not be reached. If it can't be reached, exit the socket
      warn_log=$(mktemp)
-     echo -e "${BBlue}Checking instance connectivity...${Color_Off}"
-     timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_check_command _target_ 2> /dev/null \
-      && (timeout $preflight_timeout $ssh_command_preflight _target_ exit \
-      || { $ssh_exit_command _target_ 2>/dev/null; echo _target_ unable to reconnect, relying on results already downloaded; } ) >> $warn_log 2>&1" || echo "Connectivity check timed out, proceeding with cleanup..."
+     
+     # Only do connectivity checks if hosts file exists
+     if [ -f "$tmp/hosts" ]; then
+         echo -e "${BBlue}Checking instance connectivity...${Color_Off}"
+         timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_check_command _target_ 2> /dev/null \
+          && (timeout $preflight_timeout $ssh_command_preflight _target_ exit \
+          || { $ssh_exit_command _target_ 2>/dev/null; echo _target_ unable to reconnect, relying on results already downloaded; } ) >> $warn_log 2>&1" || echo "Connectivity check timed out, proceeding with cleanup..."
+     else
+         echo -e "${BYellow}Hosts file missing, skipping connectivity check...${Color_Off}"
+     fi
 
      # Execute the commands if Ctrl+C was pressed or rm_when_done is "false"
      if [ "$ctrl_c_pressed" = true ] || [ "$rm_when_done" = "false" ]; then
 
       # Warn if any instance didn't create their $(hostname) file
-      echo -e "${BBlue}Checking scan completion status...${Color_Off}"
-      timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ \
-       '[ -f $scan_dir/_target_ ] && echo _target_ scan finished || echo _target_ scan was still running but downloading partial results'  >> $warn_log 2>&1" || echo "Status check timed out, proceeding..."
-      cat $warn_log | sort -n
+      if [ -f "$tmp/hosts" ]; then
+          echo -e "${BBlue}Checking scan completion status...${Color_Off}"
+          timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ \
+           '[ -f $scan_dir/_target_ ] && echo _target_ scan finished || echo _target_ scan was still running but downloading partial results'  >> $warn_log 2>&1" || echo "Status check timed out, proceeding..."
+          cat $warn_log | sort -n
+      else
+          echo -e "${BYellow}Hosts file missing, skipping status check...${Color_Off}"
+      fi
 
       # Download the results
-      echo -e "${BBlue}Downloading final results...${Color_Off}"
-      timeout 60 $interlace_cmd_nobar -c "timeout 30 axiom-scp _target_:$scan_dir/output $tmp/output/_target_ -F=$sshconfig >/dev/null 2>&1" || echo "Download timed out for some instances, proceeding with available results..."
+      if [ -f "$tmp/hosts" ]; then
+          echo -e "${BBlue}Downloading final results...${Color_Off}"
+          timeout 60 $interlace_cmd_nobar -c "timeout 30 axiom-scp _target_:$scan_dir/output $tmp/output/_target_ -F=$sshconfig >/dev/null 2>&1" || echo "Download timed out for some instances, proceeding with available results..."
+      else
+          echo -e "${BYellow}Hosts file missing, skipping final download...${Color_Off}"
+      fi
      fi
 
      # Merge the downloaded results
@@ -275,13 +295,22 @@ clean_up() {
     else
 
      # Kill tmux sessions with any orphaned proceses, exit all multiplexed SSH connections
-     echo -e "${BBlue}killing remote processes...please wait${Color_Off}"
-     timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ 'tmux list-sessions 2>/dev/null | grep \"^$uid-\" | cut -d: -f1 | xargs -I {} tmux kill-session -t {}'" >/dev/null 2>&1 || echo "Remote cleanup timed out, proceeding..."
-     timeout 15 $interlace_cmd_nobar -c "timeout 5 $ssh_exit_command _target_ " >/dev/null 2>&1 || echo "SSH exit timed out, proceeding..."
+     if [ -f "$tmp/hosts" ]; then
+         echo -e "${BBlue}killing remote processes...please wait${Color_Off}"
+         timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ 'tmux list-sessions 2>/dev/null | grep \"^$uid-\" | cut -d: -f1 | xargs -I {} tmux kill-session -t {}'" >/dev/null 2>&1 || echo "Remote cleanup timed out, proceeding..."
+         timeout 15 $interlace_cmd_nobar -c "timeout 5 $ssh_exit_command _target_ " >/dev/null 2>&1 || echo "SSH exit timed out, proceeding..."
+     else
+         echo -e "${BYellow}Hosts file missing, skipping remote cleanup...${Color_Off}"
+     fi
     fi
 
     # Move downloaded raw results to log file
-    mv "$AXIOM_PATH/tmp/$uid/" "$AXIOM_PATH/logs/"
+    if [ -d "$AXIOM_PATH/tmp/$uid/" ]; then
+        mv "$AXIOM_PATH/tmp/$uid/" "$AXIOM_PATH/logs/"
+    else
+        echo -e "${BYellow}Tmp directory missing, creating empty log directory...${Color_Off}"
+        mkdir -p "$AXIOM_PATH/logs/$uid"
+    fi
 
     # Get some runtime stats
     end=$(date +%s)
@@ -482,13 +511,19 @@ merge_output() {
     fi
    if [[ "$ext" == "txt" ]] ; then
         echo "mode set to $ext.. combining results into one file."
-        find $tmp/output/ -type f -exec cat {} \; > $tmp/merge
-        if [[ "$anew" == "true" ]]; then
-            cat "$tmp/merge" | anew -q "$outfile"
+        if [ -d "$tmp/output/" ] && [ "$(find $tmp/output/ -type f | wc -l)" -gt 0 ]; then
+            find $tmp/output/ -type f -exec cat {} \; > $tmp/merge
+            if [[ "$anew" == "true" ]]; then
+                cat "$tmp/merge" | anew -q "$outfile"
+            else
+                mv "$tmp/merge" "$outfile"
+            fi
+            output_lines=$(wc -l $outfile 2>/dev/null | tr -s ' ' | cut -d ' ' -f 1)
         else
-            mv "$tmp/merge" "$outfile"
+            echo -e "${BYellow}No output files found, creating empty output file...${Color_Off}"
+            touch "$outfile"
+            output_lines=0
         fi
-        output_lines=$(wc -l $outfile | tr -s ' ' | cut -d ' ' -f 1)
    elif [[ "$ext" == "oG" ]] || [[ "$ext" == "jsonl" ]]; then
         echo "mode set to $ext.. sorting unique."
         find $tmp/output/ -type f -exec cat {} \; | sort -u > $tmp/merge
