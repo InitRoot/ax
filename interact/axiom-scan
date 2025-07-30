@@ -192,20 +192,32 @@ function help() {
 #
 clean_up() {
      trap exit SIGINT SIGTERM
+     
+     echo -e "${BYellow}Cleaning up processes...${Color_Off}"
 
-     if kill -0 $remotetailPID &> /dev/null; then
-        kill -9 $remotetailPID &> /dev/null
-        wait $remotetailPID &> /dev/null
-     fi
-     if kill -0 $downloaderPID &> /dev/null; then
+     # Kill downloader process first
+     if [ -n "$downloaderPID" ] && kill -0 $downloaderPID &> /dev/null; then
+        echo -e "${BBlue}Stopping downloader process...${Color_Off}"
         kill -9 $downloaderPID &> /dev/null
         wait $downloaderPID &> /dev/null
      fi
 
-     if kill -0 $tailPID &> /dev/null; then
+     # Kill remote tail process
+     if [ -n "$remotetailPID" ] && kill -0 $remotetailPID &> /dev/null; then
+        echo -e "${BBlue}Stopping remote tail process...${Color_Off}"
+        kill -9 $remotetailPID &> /dev/null
+        wait $remotetailPID &> /dev/null
+     fi
+
+     # Kill local tail process
+     if [ -n "$tailPID" ] && kill -0 $tailPID &> /dev/null; then
+        echo -e "${BBlue}Stopping local tail process...${Color_Off}"
         kill -9 $tailPID &> /dev/null
         wait $tailPID &> /dev/null
      fi
+     
+     # Kill any remaining background jobs
+     jobs -p | xargs -r kill -9 2>/dev/null
 
      # Check if Ctrl+C was pressed, if it was set scan_status to cancelled
      if [ "$ctrl_c_pressed" = true ]; then
@@ -218,20 +230,23 @@ clean_up() {
 
      # Check if any instance can not be reached. If it can't be reached, exit the socket
      warn_log=$(mktemp)
-     $interlace_cmd_nobar -c "$ssh_check_command _target_ 2> /dev/null \
+     echo -e "${BBlue}Checking instance connectivity...${Color_Off}"
+     timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_check_command _target_ 2> /dev/null \
       && (timeout $preflight_timeout $ssh_command_preflight _target_ exit \
-      || { $ssh_exit_command _target_ 2>/dev/null; echo _target_ unable to reconnect, relying on results already downloaded; } ) >> $warn_log 2>&1"
+      || { $ssh_exit_command _target_ 2>/dev/null; echo _target_ unable to reconnect, relying on results already downloaded; } ) >> $warn_log 2>&1" || echo "Connectivity check timed out, proceeding with cleanup..."
 
      # Execute the commands if Ctrl+C was pressed or rm_when_done is "false"
      if [ "$ctrl_c_pressed" = true ] || [ "$rm_when_done" = "false" ]; then
 
       # Warn if any instance didn't create their $(hostname) file
-      $interlace_cmd_nobar -c "$ssh_command _target_ \
-       '[ -f $scan_dir/_target_ ] && echo _target_ scan finished || echo _target_ scan was still running but downloading partial results'  >> $warn_log 2>&1"
+      echo -e "${BBlue}Checking scan completion status...${Color_Off}"
+      timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ \
+       '[ -f $scan_dir/_target_ ] && echo _target_ scan finished || echo _target_ scan was still running but downloading partial results'  >> $warn_log 2>&1" || echo "Status check timed out, proceeding..."
       cat $warn_log | sort -n
 
       # Download the results
-      $interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/output $tmp/output/_target_ --cache -F=$sshconfig >/dev/null 2>&1"
+      echo -e "${BBlue}Downloading final results...${Color_Off}"
+      timeout 60 $interlace_cmd_nobar -c "timeout 30 axiom-scp _target_:$scan_dir/output $tmp/output/_target_ -F=$sshconfig >/dev/null 2>&1" || echo "Download timed out for some instances, proceeding with available results..."
      fi
 
      # Merge the downloaded results
@@ -246,7 +261,7 @@ clean_up() {
       fi
        mkdir -p "$outfile-download"
        echo -e "${BGreen}downloading arbitrary remote file ${BGreen}to${Color_Off}: ${Color_Off}[ ${BBlue}$outfile-download${Color_Off} ]"
-       $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp _target_:/home/op/scan/$uid/_target_/$download_file_path $outfile-download/_target_ --cache -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
+       $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp _target_:/home/op/scan/$uid/_target_/$download_file_path $outfile-download/_target_ -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
        echo -e "${Green}arbitrary remote file downloaded successfully!${Color_Off}"
      fi
 
@@ -261,8 +276,8 @@ clean_up() {
 
      # Kill tmux sessions with any orphaned proceses, exit all multiplexed SSH connections
      echo -e "${BBlue}killing remote processes...please wait${Color_Off}"
-     $interlace_cmd_nobar -c "$ssh_command _target_ 'tmux list-sessions 2>/dev/null | grep \"^$uid-\" | cut -d: -f1 | xargs -I {} tmux kill-session -t {}'" >/dev/null 2>&1
-     $interlace_cmd_nobar -c "$ssh_exit_command _target_ " >/dev/null 2>&1
+     timeout 30 $interlace_cmd_nobar -c "timeout 10 $ssh_command _target_ 'tmux list-sessions 2>/dev/null | grep \"^$uid-\" | cut -d: -f1 | xargs -I {} tmux kill-session -t {}'" >/dev/null 2>&1 || echo "Remote cleanup timed out, proceeding..."
+     timeout 15 $interlace_cmd_nobar -c "timeout 5 $ssh_exit_command _target_ " >/dev/null 2>&1 || echo "SSH exit timed out, proceeding..."
     fi
 
     # Move downloaded raw results to log file
@@ -519,7 +534,7 @@ merge_output() {
          fi
         echo "Downloading gowitness databases..."
         mkdir -p "$tmp/dbs/"
-        $interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/gowitness.sqlite3 $tmp/dbs/_target_.sqlite3 --cache -F=$sshconfig>> /dev/null"
+        $interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/gowitness.sqlite3 $tmp/dbs/_target_.sqlite3 -F=$sshconfig>> /dev/null"
         echo "Merging databases..."
         gowitness report merge --source-path "$tmp/" --output-file  "$outfile/gowitness.sqlite3"
         echo -e "${Green}RUN: '${BBlue}gowitness report server --db-uri sqlite://$outfile/gowitness.sqlite3 --screenshot-path $outfile/${Color_Off}' for reporting"
@@ -1092,7 +1107,10 @@ fi
 #  clean_up function called by trap when CTRL+C is pressed
 #
 stty -echoctl
-trap 'ctrl_c_pressed=true; clean_up' SIGINT SIGTERM
+# Enhanced signal handling to ensure Ctrl+C works
+trap 'echo -e "\n${BRed}Interrupt signal received, forcing cleanup...${Color_Off}"; ctrl_c_pressed=true; clean_up; exit 130' SIGINT SIGTERM
+# Also handle EXIT to ensure cleanup on any exit
+trap 'clean_up' EXIT
 
 ###########################################################################################################
 #  Destination directory on the instances and the command used to SSH to them
@@ -1241,7 +1259,7 @@ fi
 #
 if [[ -f "$local_wordlist" ]]; then
     echo -e "${BGreen}uploading local wordlist${Color_Off}${BBlue} : $local_wordlist_filename${Color_Off} to ${BBlue}$destination_wordlist...${Color_Off}"
-    interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_wordlist  _target_:$destination_wordlist --cache -F=$sshconfig >> /dev/null"
+    interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_wordlist  _target_:$destination_wordlist -F=$sshconfig >> /dev/null"
     echo -e "${Green}wordlist uploaded successfully!${Color_Off}"
 fi
 
@@ -1258,7 +1276,7 @@ if [[ "$distribute_wordlist" != "false" ]]; then
     split_file $(realpath "$distribute_wordlist") "$total_instances" $tmp/distribute_wordlist
     # hack to stop overwriting $lines and $tmp
     lines=$lines1 && tmp=$tmp1 && divisor=$divisor1
-    $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/distribute_wordlist/input/_target_ _target_:$destination_wordlist --cache -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
+    $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/distribute_wordlist/input/_target_ _target_:$destination_wordlist -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
     echo -e "${Green}distributed wordlist successfully!${Color_Off}"
 fi
 
@@ -1271,7 +1289,7 @@ if [[ "$local_folder" != "false" ]]; then
         destination_folder="/home/op/scan/$uid/_target_/$local_folder_filename"
         folder="$destination_folder"
         echo -e "${BGreen}uploading local folder ${Color_Off}: ${BBlue} $local_folder${Color_Off} to ${BBlue}$destination_folder...${Color_Off}"
-        interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_folder _target_:$destination_folder/ --cache -F=$sshconfig >> /dev/null"
+        interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_folder _target_:$destination_folder/ -F=$sshconfig >> /dev/null"
         echo -e "${Green}custom folder uploaded successfully!${Color_Off}"
  fi
 fi
@@ -1285,7 +1303,7 @@ if [[ "$local_config" != "false" ]]; then
   destination_config="/home/op/scan/$uid/_target_/$user_config_filename"
   config_file="$destination_config"
   echo -e "${BGreen}uploading local config file${Color_Off}${BBlue} : $local_config${Color_Off} to ${BBlue}$destination_config...${Color_Off}"
-  interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_config _target_:$destination_config --cache -F=$sshconfig >> /dev/null"
+  interlace --no-bar --silent -threads $total_instances -tL "$tmp/selected.conf" -c "$AXIOM_PATH/interact/axiom-scp $local_config _target_:$destination_config -F=$sshconfig >> /dev/null"
   echo -e "${Green}local config uploaded successfully!${Color_Off}"
  fi
 fi
@@ -1297,7 +1315,7 @@ if [[ "$upload_user_arg" != "false" ]]; then
  if [[ -f "$upload_file_path" ]]; then
   echo -e "${BGreen}uploading arbitrary local file \
 ${Color_Off}[ ${BBlue}$upload_file_path${Color_Off} ] ${BGreen}to${Color_Off}: ${Color_Off} [ ${BBlue}$scan_dir/$(basename $upload_file_path)${Color_Off} ${Color_Off}]${BGreen} | ${Color_Off}"
-  $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $upload_file_path _target_:$scan_dir/$(basename $upload_file_path) --cache -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
+  $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $upload_file_path _target_:$scan_dir/$(basename $upload_file_path) -F=$sshconfig >/dev/null 2>&1" | grep -v "Gen"
   echo -e "${Green}arbitrary local file uploaded successfully!${Color_Off}"
  else
   echo -e "${Red}Error: arbitrary local file file not found '$upload_file_path'...${Color_Off}"
@@ -1407,7 +1425,7 @@ fi
 ###########################################################################################################
 #  use axiom-scp to upload each input file to a remote instance
 #
-#$interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input --cache -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_" && echo -n -e "[ ${Green}OK${Color_Off} ]\n" || echo -n -e "[ ${Red}FAIL${Color_Off} ]\n" 
+#$interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_" && echo -n -e "[ ${Green}OK${Color_Off} ]\n" || echo -n -e "[ ${Red}FAIL${Color_Off} ]\n" 
 $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _target_:$scan_dir/input -F=$sshconfig >/dev/null 2>&1; touch $tmp/logs/_target_"
 
 ###########################################################################################################
@@ -1419,11 +1437,26 @@ $interlace_cmd_nobar -c "$AXIOM_PATH/interact/axiom-scp $tmp/input/_target_ _tar
 #  Once all instances have created their $(hostname) file, this function exits.
 #
 function downloader () {
+local max_wait_cycles=120  # 120 * 30 seconds = 1 hour max wait
+local wait_cycles=0
+
 while true; do
 sleep 30
+wait_cycles=$((wait_cycles + 1))
+
+# Timeout protection - exit if we've been waiting too long
+if [ $wait_cycles -ge $max_wait_cycles ]; then
+    echo -e "${BRed}Downloader timeout reached after $((max_wait_cycles * 30)) seconds. Forcing completion...${Color_Off}"
+    # Mark all remaining instances as completed to break the loop
+    for instance in $(cat "$tmp/hosts"); do
+        echo "$instance" >> "$tmp/status/completed/hosts"
+    done
+    sort -u "$tmp/status/completed/hosts" -o "$tmp/status/completed/hosts" >/dev/null 2>&1
+    break
+fi
 
 # check to see if the instance's $(hostname) file exists on the remote tmp scan working dir by trying to download the file
-$interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/_target_ $tmp/status/inprogress/_target_ --cache -F=$sshconfig >/dev/null 2>&1"
+timeout 30 $interlace_cmd_nobar -c "timeout 15 axiom-scp _target_:$scan_dir/_target_ $tmp/status/inprogress/_target_ -F=$sshconfig >/dev/null 2>&1"
 for host in "$tmp/status/inprogress/"*
 do
   if [ -e "$host" ]; then
@@ -1440,7 +1473,7 @@ downloader_cmd="$(which interlace) --no-bar --silent -tL $tmp/status/downloader_
 
 # if its a ONE-SHOT module, just download whatever results are available in the remote instances
 if [[ "$one_shot_module" == "true" ]]; then
- $interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/output $tmp/output/_target_ --delete --cache -F=$sshconfig >/dev/null 2>&1"
+ $interlace_cmd_nobar -c "axiom-scp _target_:$scan_dir/output $tmp/output/_target_ --delete -F=$sshconfig >/dev/null 2>&1"
 
 # if its a Simple-Module, when any instance creates their $(hostname) file, download the results
 else
@@ -1448,7 +1481,7 @@ else
   sleep 10
   continue
  else
-  $downloader_cmd -c "axiom-scp _target_:$scan_dir/output $tmp/output/_target_ --delete --cache -F=$sshconfig >/dev/null 2>&1"
+  $downloader_cmd -c "axiom-scp _target_:$scan_dir/output $tmp/output/_target_ --delete -F=$sshconfig >/dev/null 2>&1"
  fi
 fi
 
@@ -1509,8 +1542,10 @@ fi
 # make sure the list of hostnames files downloaded was the same list you started with
 sort -u "$tmp/status/completed/hosts" -o "$tmp/status/completed/hosts" >/dev/null 2>&1
  if cmp -s $tmp/status/completed/hosts $tmp/hosts ; then
-  kill -9 $(cat $tmp/status/remotetailPID)  >> /dev/null 2>&1
-  wait $(cat $tmp/status/remotetailPID)  >> /dev/null 2>&1
+  if [ -f "$tmp/status/remotetailPID" ] && kill -0 $(cat $tmp/status/remotetailPID) 2>/dev/null; then
+      kill -9 $(cat $tmp/status/remotetailPID)  >> /dev/null 2>&1
+      wait $(cat $tmp/status/remotetailPID)  >> /dev/null 2>&1
+  fi
  break >> /dev/null 2>&1
  else
   continue
@@ -1572,7 +1607,7 @@ if [[ "$command" =~ "_target_" ]] || [[ "$command" =~ "_safe-target_" ]]&& [[ "$
   sed -i '1 s/$/ ; echo _cleantarget_ >> finished.txt /' "$tmp/command"
  fi
 fi
-$interlace_cmd_nobar -c "axiom-scp $tmp/command _target_:$scan_dir/command --cache -F=$sshconfig >/dev/null 2>&1" >/dev/null 2>&1
+$interlace_cmd_nobar -c "axiom-scp $tmp/command _target_:$scan_dir/command -F=$sshconfig >/dev/null 2>&1" >/dev/null 2>&1
 
 ###########################################################################################################
 #  This is essentially the crux of ax scan, where we execute the final ONE-SHOT or Simple-Module command across the fleet
@@ -1587,7 +1622,12 @@ sleep 3
 downloader &
 downloaderPID=$!
 
-timeout $max_scan_runtime $interlace_cmd_nobar -c "$ssh_command _target_ 'cd $scan_dir && touch stderr.log stdout.log && tail -f $stderr_log & tail -f stdout.log' >> $log_redirect 2>&1 " &
+# Add timeout for remote tail with fallback
+if [ "$max_scan_runtime" -eq 0 ]; then
+    max_scan_runtime=3600  # Default 1 hour timeout
+fi
+
+timeout $max_scan_runtime $interlace_cmd_nobar -c "timeout $((max_scan_runtime - 60)) $ssh_command _target_ 'cd $scan_dir && touch stderr.log stdout.log && timeout 30 tail -f $stderr_log & timeout 30 tail -f stdout.log' >> $log_redirect 2>&1 " &
 remotetailPID=$!
 echo $remotetailPID > $tmp/status/remotetailPID
 
@@ -1606,8 +1646,11 @@ else
 fi
 
 # "ssh _target_ 'tmux new -d -s $uid-_target_ && tmux send-keys -t $uid-_target_ \"cd /path; bash -i command > log 2>&1 ; touch _target_\" ENTER && tmux send-keys -t $uid-_target_ C-d'"
-# wait until 'remote tail PID' returns
- wait $remotetailPID  >> /dev/null 2>&1
+# wait until 'remote tail PID' returns with timeout protection
+echo -e "${BGreen}Waiting for scan completion...${Color_Off}"
+if ! wait $remotetailPID; then
+    echo -e "${BYellow}Remote tail process exited unexpectedly, continuing with cleanup...${Color_Off}"
+fi
 
 ###########################################################################################################
 # merge results, kill any orphened processes and perform exit house keeping
