@@ -1050,10 +1050,13 @@ mkdir -p "$AXIOM_PATH/tmp/$uid/sockets"
 socket_tmp=$(echo "$AXIOM_PATH/tmp/$uid/sockets")
 cat <<EOT >> $(echo $sshconfig)
 Host *
-    ControlMaster auto
-    ControlPath $socket_tmp/%h
-    ControlPersist 600
+    ControlMaster no
+    ControlPath none
+    ControlPersist no
     ConnectTimeout 10
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
 EOT
 
 ###########################################################################################################
@@ -1098,8 +1101,8 @@ trap 'ctrl_c_pressed=true; clean_up' SIGINT SIGTERM
 #
 scan_dir="/home/op/scan/$uid/_target_"
 ssh_command="ssh -F $sshconfig -o StrictHostKeyChecking=no"
-ssh_check_command="ssh -F $sshconfig -O check -o StrictHostKeyChecking=no"
-ssh_exit_command="ssh -F $sshconfig -O exit -o StrictHostKeyChecking=no"
+ssh_check_command="ssh -F $sshconfig -o StrictHostKeyChecking=no -o ConnectTimeout=5"
+ssh_exit_command="true"
 
 ###########################################################################################################
 # Add default interlace commandmand
@@ -1115,7 +1118,7 @@ if [[ $pre_flight == true ]]; then
    rm -f "$tmp/hosts_preflight"
    ssh_command_preflight="ssh -F $sshconfig -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o ConnectTimeout=$preflight_timeout"
    interlace_cmd="$(which interlace) --silent -tL $tmp/hosts -threads $total_instances"
-   $interlace_cmd_nobar -c "$ssh_check_command _target_ 2> /dev/null && (timeout $preflight_timeout $ssh_command_preflight _target_ exit || $ssh_exit_command _target_ ) "  #>> /dev/null 2>&1
+   $interlace_cmd_nobar -c "timeout $preflight_timeout $ssh_command_preflight _target_ exit 2>/dev/null"
    $interlace_cmd -c "$ssh_command_preflight _target_ 'echo _target_' >> $tmp/hosts_preflight"
    cat "$tmp/hosts_preflight" | sort -u  > "$tmp/hosts"
    cp "$tmp/hosts_preflight" "$tmp/selected.conf"
